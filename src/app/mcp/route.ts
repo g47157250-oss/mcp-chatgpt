@@ -16,11 +16,8 @@ export const dynamic = "force-dynamic";
 /** جلسات نشطة في الذاكرة (serverless: تُستبدل بجلسة جديدة تلقائيًا عند فقدانها) */
 const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
 
-function authOk(req: NextRequest): boolean {
-  const token = process.env.MCP_ACCESS_TOKEN;
-  if (!token) return true;
-  return req.headers.get("authorization") === `Bearer ${token}`;
-}
+// التحديث 1.3.0: إزالة الحماية نهائيًا — الـ MCP يعمل مفتوحًا بدون تسجيل دخول ولا توكن،
+// حتى لا يطلب أي تطبيق (ChatGPT/Claude/Cursor) مصادقة عند الربط.
 
 /** إنشاء سيرفر + transport جديد وربطهما وتسجيل الجلسة */
 function createSession(): { server: McpServer; transport: WebStandardStreamableHTTPServerTransport } {
@@ -37,11 +34,6 @@ function createSession(): { server: McpServer; transport: WebStandardStreamableH
 }
 
 export async function POST(req: NextRequest) {
-  if (!authOk(req)) {
-    return new Response(JSON.stringify({ error: "unauthorized" }), {
-      status: 401, headers: { "Content-Type": "application/json" },
-    });
-  }
   await ensureSchema().catch(() => { /* يُفحص داخل الأدوات أيضًا */ });
 
   // إعادة استخدام الجلسة الموجودة؛ إن ضاعت (serverless إعادة تشغيل) نطلب من العميل إعادة التهيئة
@@ -67,9 +59,6 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!authOk(req)) {
-    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
-  }
   const sid = req.headers.get("mcp-session-id");
   if (sid) {
     const t = sessions.get(sid);

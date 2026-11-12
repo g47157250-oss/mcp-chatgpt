@@ -11,7 +11,7 @@ import {
 } from "@/lib/orchestrator";
 import { MERGER_LIMITS } from "@/lib/merger";
 
-export const SERVER_INFO = { name: "media-generator-mcp", version: "1.2.0" } as const;
+export const SERVER_INFO = { name: "media-generator-mcp", version: "1.3.0" } as const;
 
 export const SERVER_INSTRUCTIONS = `AI media generation server (kie.ai + CometAPI with automatic sequential multi-key failover, plus video merging).
 Workflow: call generate_image or generate_video. If the response contains finished URLs, show them to the user.

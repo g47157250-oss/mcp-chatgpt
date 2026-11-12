@@ -16,6 +16,6 @@ export async function GET() {
     mcpEndpoint: "/mcp",
     models: MODELS.map((m) => ({ canonical: m.canonical, type: m.type, providers: m.providers })),
     merger: { base: mergerConfigured() ? process.env.MERGER_API_BASE : "not-configured", healthy: merger },
-    authRequired: !!process.env.MCP_ACCESS_TOKEN,
+    authRequired: false, // التحديث 1.3.0: الـ MCP مفتوح دائمًا بدون تسجيل دخول
   });
 }

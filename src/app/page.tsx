@@ -50,6 +50,11 @@ export default function Dashboard() {
   const [origin, setOrigin] = useState("");
   const [form, setForm] = useState({ provider: "kie", label: "", api_key: "" });
   const [busy, setBusy] = useState(false);
+  // التحديث 1.3.0 — حالة بطاقة دمج الفيديوهات
+  const [mergeSel, setMergeSel] = useState<string[]>([]); // معرّفات المهام المختارة بالترتيب
+  const [mergeUrls, setMergeUrls] = useState("");         // روابط مباشرة سطر لكل رابط
+  const [merging, setMerging] = useState(false);
+  const [mergeResult, setMergeResult] = useState<{ taskId?: string; message: string; error?: boolean } | null>(null);
 
   useEffect(() => { setOrigin(window.location.origin); }, []);
 
@@ -105,6 +110,48 @@ export default function Dashboard() {
     loadKeys();
   }
 
+  // التحديث 1.3.0 — دمج الفيديوهات: روابط المهام المكتملة بالترتيب المختار + الروابط المباشرة
+  const completedVideoTasks = useMemo(
+    () => tasks.filter((t) => t.type === "video" && t.status === "completed" && t.resultUrls.length > 0),
+    [tasks]
+  );
+  function toggleSelect(id: string) {
+    setMergeSel((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id)
+      : prev.length >= 10 ? (toast({ title: "أقصى عدد 10 مقاطع للدمج", variant: "destructive" }), prev)
+      : [...prev, id]
+    );
+  }
+  function moveSel(id: string, dir: -1 | 1) {
+    setMergeSel((prev) => {
+      const i = prev.indexOf(id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]]; // ترتيب الدمج: الأول يبدأ الفيديو النهائي
+      return next;
+    });
+  }
+  async function doMerge() {
+    const urls = mergeUrls.split("\n").map((u) => u.trim()).filter((u) => /^https?:\/\//.test(u));
+    if (mergeSel.length + urls.length < 2) {
+      toast({ title: "اختر مقطعَين على الأقل (أو أدخل رابطين)", variant: "destructive" });
+      return;
+    }
+    setMerging(true);
+    setMergeResult(null);
+    try {
+      const res = await fetch("/api/merge", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_ids: mergeSel, urls, wait_seconds: 60 }),
+      });
+      const d = await res.json();
+      setMergeResult({ taskId: d.taskId, message: d.message, error: d.isError });
+      loadTasks();
+      if (!d.isError) toast({ title: "بدأ الدمج — تابعه في لوحة المهام" });
+    } finally { setMerging(false); }
+  }
+
   function copy(text: string, what: string) {
     navigator.clipboard.writeText(text).then(
       () => toast({ title: `تم نسخ ${what}` }),
@@ -113,14 +160,9 @@ export default function Dashboard() {
   }
 
   const mcpUrl = `${origin}/mcp`;
-  const authHeader = health?.authRequired
-    ? { headers: { Authorization: "Bearer <MCP_ACCESS_TOKEN>" } } : null;
-  const chatgptJson = JSON.stringify(authHeader
-    ? { mcpServers: { "media-generator": { url: mcpUrl, ...authHeader } } }
-    : { mcpServers: { "media-generator": { url: mcpUrl } } }, null, 2);
-  const claudeJson = JSON.stringify(authHeader
-    ? { mcpServers: { "media-generator": { type: "http", url: mcpUrl, ...authHeader } } }
-    : { mcpServers: { "media-generator": { type: "http", url: mcpUrl } } }, null, 2);
+  // التحديث 1.3.0: بدون حماية — لا Authorization في أي إعدادات ربط
+  const chatgptJson = JSON.stringify({ mcpServers: { "media-generator": { url: mcpUrl } } }, null, 2);
+  const claudeJson = JSON.stringify({ mcpServers: { "media-generator": { type: "http", url: mcpUrl } } }, null, 2);
   const cursorJson = claudeJson;
 
   const statusBadge = (s: string) => {
@@ -299,7 +341,79 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* ج) ربط السيرفر */}
+        {/* ج) دمج الفيديوهات — التحديث 1.3.0 */}
+        <Card>
+          <CardHeader>
+            <CardTitle>🎬 دمج الفيديوهات في فيديو واحد متصل</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              اختر مهام فيديو مكتملة بالترتيب الذي تريده (أول مقطع يبدأ الفيديو النهائي)، أو الصق روابط مباشرة — يُدمج كل شيء في مقطع واحد متصل بالترتيب نفسه.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <p className="text-sm font-semibold mb-2">
+                المقاطع المكتملة المتاحة {mergeSel.length > 0 && <span className="text-primary">(مختار بالترتيب: {mergeSel.length})</span>}
+              </p>
+              <div className="max-h-56 overflow-y-auto space-y-2">
+                {completedVideoTasks.length === 0 && (
+                  <p className="text-sm text-muted-foreground py-2 text-center">
+                    لا توجد فيديوهات مكتملة بعد — ولّد فيديوهات أولًا أو استخدم روابط مباشرة أدناه.
+                  </p>
+                )}
+                {completedVideoTasks.map((t) => {
+                  const idx = mergeSel.indexOf(t.id);
+                  return (
+                    <label key={t.id} className={`flex items-center gap-2 rounded-lg border p-2.5 bg-white cursor-pointer ${idx >= 0 ? "border-primary" : ""}`}>
+                      <input type="checkbox" checked={idx >= 0} onChange={() => toggleSelect(t.id)} className="size-4" />
+                      <span className="text-xs text-muted-foreground" dir="ltr">{t.id.slice(0, 8)}…</span>
+                      <span className="text-sm truncate flex-1">{t.prompt || t.model}</span>
+                      {idx >= 0 && (
+                        <span className="flex items-center gap-1">
+                          <Badge className="bg-primary text-primary-foreground">#{idx + 1}</Badge>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.preventDefault(); moveSel(t.id, -1); }} title="أعلى">▲</Button>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.preventDefault(); moveSel(t.id, 1); }} title="أسفل">▼</Button>
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <Label>روابط مباشرة (سطر لكل رابط — تُدمج بعد المقاطع المختارة)</Label>
+              <textarea
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-20"
+                dir="ltr" placeholder={"https://example.com/clip1.mp4\nhttps://example.com/clip2.mp4"}
+                value={mergeUrls} onChange={(e) => setMergeUrls(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap">
+              <Button onClick={doMerge} disabled={merging}>
+                {merging ? "جارٍ بدء الدمج…" : "🔗 دمج المقاطع في فيديو واحد"}
+              </Button>
+              {mergeSel.length + mergeUrls.split("\n").filter((u) => /^https?:\/\//.test(u.trim())).length > 10 && (
+                <span className="text-xs text-red-600">تجاوزت 10 مقاطع — سيرفض السيرفر الطلب.</span>
+              )}
+            </div>
+
+            {mergeResult && (
+              <div className={`rounded-lg border p-3 text-sm whitespace-pre-wrap ${mergeResult.error ? "border-red-300 bg-red-50 text-red-800" : "border-green-300 bg-green-50 text-green-900"}`}>
+                {mergeResult.message}
+                {mergeResult.taskId && (
+                  <span className="block mt-1 text-xs" dir="ltr">task_id: {mergeResult.taskId}</span>
+                )}
+              </div>
+            )}
+
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              ⚠️ ملف الدمج النهائي يُحذف من خدمة الدمج بعد ~24 ساعة — شاهده/نزّله سريعًا. لا حاجة لأي تسجيل دخول: الربط والدمج يعملان مباشرة.
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* د) ربط السيرفر */}
         <Card>
           <CardHeader>
             <CardTitle>🔗 ربط السيرفر بأي عميل MCP</CardTitle>
