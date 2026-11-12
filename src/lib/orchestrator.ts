@@ -365,7 +365,7 @@ async function maybeResumeOnNextKey(
 
 /* ================= الدمج ================= */
 
-export async function runMerge(input: { urls?: string[]; task_ids?: string[]; wait_seconds?: number }): Promise<ToolResult> {
+export async function runMerge(input: { urls?: string[]; task_ids?: string[]; wait_seconds?: number; confirmed?: boolean }): Promise<ToolResult> {
   // 1) حل task_ids أولاً ثم urls المباشرة بنفس الترتيب
   const ordered: string[] = [];
   const failedIds: string[] = [];
@@ -408,7 +408,18 @@ export async function runMerge(input: { urls?: string[]; task_ids?: string[]; wa
     };
   }
 
-  // 3) سجل مهمة الدمج في Turso أولًا
+  // 3) بوابة تأكيد المستخدم — لا دمج فعلي بدون confirmed: true (التحديث 1.4.0)
+  if (!input.confirmed) {
+    return {
+      text: "🟡 خطوة تأكيد قبل الدمج — هذه هي المقاطع التي سيُدمجها السيرفر بهذا الترتيب:\n" +
+        ordered.map((u, i) => `${i + 1}. ${u}`).join("\n") +
+        "\n\nاعرض هذه القائمة على المستخدم واسأله: هل يوافق على ربط هذه المقاطع في فيديو واحد بهذا الترتيب؟\n" +
+        "إذا وافق المستخدم، أعد استدعاء merge_videos بنفس المعطيات مع إضافة confirmed: true لبدء الدمج الفعلي.\n" +
+        "⚠️ لا تبدأ الدمج أبدًا بدون موافقة المستخدم الصريحة.",
+    };
+  }
+
+  // 4) سجل مهمة الدمج في Turso أولًا
   const taskId = newTaskId();
   await insertTask({
     id: taskId,
@@ -420,7 +431,7 @@ export async function runMerge(input: { urls?: string[]; task_ids?: string[]; wa
   });
   const task = (await getTask(taskId))!;
 
-  // 4) إنشاء المهمة ثم تشغيل process خلفيًا مرة واحدة فقط (قفل في الذاكرة)
+  // 5) إنشاء المهمة ثم تشغيل process خلفيًا مرة واحدة فقط (قفل في الذاكرة)
   let jobId: string;
   try {
     const j = await createMergeJob(ordered);
@@ -439,7 +450,7 @@ export async function runMerge(input: { urls?: string[]; task_ids?: string[]; wa
   await updateTask(taskId, { provider: "merger", provider_task_id: jobId });
   await ensureProcessStarted(jobId, taskId);
 
-  // 5) نافذة انتظار مع بث تقدم وتحديث فوري في Turso
+  // 6) نافذة انتظار مع بث تقدم وتحديث فوري في Turso
   const waitSeconds = clamp(input.wait_seconds ?? 60, 0, 240);
   const deadline = Date.now() + waitSeconds * 1000;
   while (Date.now() < deadline) {

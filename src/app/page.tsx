@@ -185,6 +185,9 @@ export default function Dashboard() {
           <div>
             <h1 className="text-xl font-bold">MCP Media Generator</h1>
             <p className="text-sm text-muted-foreground">خادم توليد الصور والفيديو ودمج المقاطع — لوحة الإدارة</p>
+            <p className="text-xs font-medium text-green-700 mt-1">
+              الإصدار 1.4.0 — تحديث يوم 12 نوفمبر 2026 · بدون تسجيل دخول · بدون حماية · كلمة التحقق: «شمساء» ☀️
+            </p>
           </div>
           <div className="flex items-center gap-2 text-sm">
             {health ? (

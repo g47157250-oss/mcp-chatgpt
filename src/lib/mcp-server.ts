@@ -11,13 +11,13 @@ import {
 } from "@/lib/orchestrator";
 import { MERGER_LIMITS } from "@/lib/merger";
 
-export const SERVER_INFO = { name: "media-generator-mcp", version: "1.3.0" } as const;
+export const SERVER_INFO = { name: "media-generator-mcp", version: "1.4.0" } as const;
 
 export const SERVER_INSTRUCTIONS = `AI media generation server (kie.ai + CometAPI with automatic sequential multi-key failover, plus video merging).
 Workflow: call generate_image or generate_video. If the response contains finished URLs, show them to the user.
 If it returns a task_id with status PROCESSING, call get_task with that task_id every ~10 seconds until status is completed (show the URL) or failed (explain why).
 IMPORTANT: the server automatically switches API keys in strict order on any failure (exhausted balance, invalid key, rate limits) and continues the SAME task under the same task_id — you will never encounter key/balance errors. Never stop or warn the user about keys or balances; just keep polling get_task until the result appears.
-To concatenate several finished clips into one video, call merge_videos with 'urls' (direct links) or 'task_ids' (completed video tasks, in merge order); track it with get_task the same way. Note: the merged file is stored on the merging service for ~24 hours only — tell the user to watch/download it promptly.
+To concatenate several finished clips into one video, ALWAYS use the two-step approval flow: first call merge_videos WITHOUT 'confirmed' — it returns the ordered list of clips to be merged; show this list to the user and ask for approval; only after the user explicitly agrees, call merge_videos again with the SAME inputs plus confirmed: true to start the actual merge. Never merge without the user's approval. Track the merge with get_task the same way. Note: the merged file is stored on the merging service for ~24 hours only — tell the user to watch/download it promptly.
 Use list_media to recall previously generated media from the database. Use list_models to browse the model catalog and pick the right model for the user's request.`;
 
 /** تحويل نتيجة الأداة إلى شكل MCP */
@@ -64,13 +64,15 @@ export function registerTools(server: McpServer): void {
   /* 3) merge_videos */
   server.tool(
     "merge_videos",
-    `Merge several clips into ONE final video in the given order. Pass 'urls' (public direct video URLs) or 'task_ids' (completed video tasks, resolved in order — ideal after generating several clips). Usually fast: short wait with progress streaming, then a merge task_id — track it with get_task. IMPORTANT: the merged file is stored on the merging service for ~24 hours only — tell the user to watch/download it promptly. Max ${MERGER_LIMITS.maxVideos} clips.`,
+    `Merge several clips into ONE final video in the given order — TWO-STEP flow with user approval: 1) call WITHOUT 'confirmed' first: the tool validates inputs and returns the ordered list of clips that WILL be merged — show it to the user and ask for approval, nothing is merged yet. 2) Only after the user explicitly agrees, call again with the SAME inputs plus confirmed: true to start the actual merge. Pass 'urls' (public direct video URLs) or 'task_ids' (completed video tasks, resolved in order). Track the merge with get_task. IMPORTANT: the merged file is stored on the merging service for ~24 hours only — tell the user to watch/download it promptly. Max ${MERGER_LIMITS.maxVideos} clips.`,
     {
       // التحقق من العدد (≥2 و ≤10) يتم في runMerge برسائل عربية — لا حد هنا ليصعد الخطأ العربي
       urls: z.array(z.string()).optional()
         .describe("Public direct video URLs (http/https) in merge order — the first clip starts the final video. 2–10 clips."),
       task_ids: z.array(z.string()).optional()
         .describe("Alternative to urls: task_ids of COMPLETED video generation tasks — their result URLs are merged in this order. 2–10 ids."),
+      confirmed: z.boolean().default(false)
+        .describe("User-approval gate. false (default) = dry run: validates and returns the ordered clip list for the user to approve — NOTHING is merged. true = the user approved the list, start the actual merge."),
       wait_seconds: z.number().int().min(0).max(240).default(60),
     },
     async (args) => tr(await runMerge(args))

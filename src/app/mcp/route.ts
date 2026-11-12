@@ -71,13 +71,30 @@ export async function DELETE(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  // دعم قناة الاستماع SSE للجلسات القائمة (اختياري حسب المواصفة)
-  const sid = req.headers.get("mcp-session-id");
-  const t = sid ? sessions.get(sid) : undefined;
-  if (!t) {
-    return new Response(JSON.stringify({ error: "جلسة غير موجودة — أعد التهيئة بـ initialize" }), {
-      status: 404, headers: { "Content-Type": "application/json" },
-    });
-  }
-  return await t.handleRequest(req as unknown as Request);
+  // حسب مواصفة MCP: سيرفر لا يفتح قناة SSE للجلسات المفتوحة يعيد 405 (وليس 401/404)
+  // حتى لا يظن أي عميل (Claude/ChatGPT/Cursor) أن السيرفر يطلب مصادقة.
+  return new Response(JSON.stringify({
+    jsonrpc: "2.0",
+    error: { code: -32000, message: "Method not allowed — استخدم POST مع initialize لبدء جلسة" },
+    id: null,
+  }), {
+    status: 405,
+    headers: {
+      "Content-Type": "application/json",
+      Allow: "POST, DELETE",
+    },
+  });
+}
+
+export async function OPTIONS() {
+  // بعض العملاء يرسل preflight — نرد بشكل مفتوح تمامًا بدون أي مطالبة بمصادقة
+  return new Response(null, {
+    status: 204,
+    headers: {
+      Allow: "POST, GET, DELETE, OPTIONS",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "*",
+      "Access-Control-Allow-Methods": "POST, GET, DELETE, OPTIONS",
+    },
+  });
 }
